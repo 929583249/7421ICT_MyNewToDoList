@@ -1,74 +1,85 @@
-import React, { useState, useEffect }from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { StyleSheet, Text, View, TouchableOpacity, FlatList } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, FlatList, Alert, StyleSheet } from 'react-native';
 import NewToDoScreen from './src/NewToDoScreen';
-import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { NavigationContainer } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { v4 as uuidv4 } from 'uuid';  // 引入 uuid 库
+import 'react-native-get-random-values';
 
 const Stack = createNativeStackNavigator();
 
-
 function HomeScreen({ navigation, route }) {
-  useEffect(() => {
-    if (route.params?.newTodo) { // 检查是否有新任务传入
-      const newTodo = route.params.newTodo;
-      const newId = todos.length + 1; // 简单生成新ID
-      setTodos([...todos, { ...newTodo, id: `${newId}`, completed: false }]);
-      route.params.newTodo = null; // 清除参数避免重复添加
-    }
-  }, [route.params?.newTodo]); // 依赖于新任务的参数
-
+  const [todos, setTodos] = useState([]);
   const [expanded, setExpanded] = useState({});
-  const [todos, setTodos] = useState([
-    { id: '1', title: 'FIRST THING', description: '1', completed: false },
-    { id: '2', title: 'SECOND THING', description: '2', completed: false },
-    { id: '3', title: 'THIRD THING', description: '3', completed: false },
-    { id: '4', title: 'FOURTH THING', description: '4', completed: false }
-  ]);
-  const [lastAction, setLastAction] = useState(null);  // 用于追踪最后一次操作的状态
+  const [lastAction, setLastAction] = useState(null);
 
-  const toggleExpand = (id) => {
-    setExpanded(prevState => ({
-      ...prevState,
-      [id]: !prevState[id]
-    }));
+  useEffect(() => {
+    const loadTodos = async () => {
+      const storedTodos = await AsyncStorage.getItem('todos');
+      if (storedTodos) {
+        setTodos(JSON.parse(storedTodos));
+      }
+    };
+    loadTodos();
+  }, []);
+
+  useEffect(() => {
+    if (route.params?.newTodo) {
+      const newTodo = route.params.newTodo;
+      const newId = uuidv4();  // 使用 uuid 生成唯一的 id
+      const updatedTodos = [...todos, { ...newTodo, id: newId, completed: false }];
+      setTodos(updatedTodos);
+      saveTodos(updatedTodos);
+      navigation.setParams({ newTodo: null });
+    }
+  }, [route.params?.newTodo]);
+
+  const saveTodos = async (updatedTodos) => {
+    try {
+      await AsyncStorage.setItem('todos', JSON.stringify(updatedTodos));
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save the todos.');
+    }
   };
 
   const handleComplete = (id) => {
-    setTodos(prevTodos => prevTodos.map(todo => 
-      todo.id === id ? { ...todo, completed: true } : todo
-    ));
-    setLastAction({ action: 'complete', id: id });  // 确保这里正确设置了
+    const updatedTodos = todos.map(todo => todo.id === id ? { ...todo, completed: !todo.completed } : todo);
+    setTodos(updatedTodos);
+    saveTodos(updatedTodos);
+    setLastAction({ type: 'complete', id, completed: !todos.find(todo => todo.id === id).completed });
   };
-  
+
   const handleDelete = (id) => {
-    const deletedItem = todos.find(todo => todo.id === id);
-    setTodos(prevTodos => prevTodos.filter(todo => todo.id !== id));
-    setLastAction({ action: 'delete', id: id, item: deletedItem });  // 确保这里正确设置了
+    const updatedTodos = todos.filter(todo => todo.id !== id);
+    setTodos(updatedTodos);
+    saveTodos(updatedTodos);
+    setLastAction({ type: 'delete', item: todos.find(todo => todo.id === id) });
   };
 
   const handleUndo = () => {
-    console.log("Undo clicked");  // 检查这个函数是否被调用
-    if (!lastAction) return;  // 如果没有可撤销的操作，则不执行任何操作
-    const { action, id, item } = lastAction;
-    if (action === 'complete') {
-      // 撤销完成操作
-      setTodos(prevTodos => prevTodos.map(todo => 
-        todo.id === id ? { ...todo, completed: false } : todo
-      ));
-    } else if (action === 'delete') {
-      // 撤销删除操作
-      setTodos(prevTodos => [...prevTodos, item].sort((a, b) => parseInt(a.id) - parseInt(b.id))); // 确保列表按ID排序
+    if (!lastAction) return;
+    if (lastAction.type === 'complete') {
+      const updatedTodos = todos.map(todo => todo.id === lastAction.id ? { ...todo, completed: lastAction.completed } : todo);
+      setTodos(updatedTodos);
+      saveTodos(updatedTodos);
+    } else if (lastAction.type === 'delete') {
+      const updatedTodos = [...todos, lastAction.item].sort((a, b) => a.id.localeCompare(b.id));
+      setTodos(updatedTodos);
+      saveTodos(updatedTodos);
     }
-    setLastAction(null);  // 清除最后一次操作的记录
+    setLastAction(null);
   };
-  
+
+  const toggleExpand = (id) => {
+    setExpanded(prevState => ({ ...prevState, [id]: !prevState[id] }));
+  };
 
   const renderItem = ({ item }) => (
     <TouchableOpacity onPress={() => toggleExpand(item.id)} style={styles.itemContainer}>
       <View style={styles.itemHeader}>
-        <Text style={[styles.itemTitle, item.completed && {color: 'green'}]}>{item.title}</Text>
+        <Text style={[styles.itemTitle, item.completed && { color: 'green' }]}>{item.title}</Text>
         <Ionicons name={expanded[item.id] ? 'chevron-up' : 'chevron-down'} size={24} color="black" />
       </View>
       {expanded[item.id] && (
@@ -92,8 +103,9 @@ function HomeScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
-        <Ionicons name="arrow-back-circle-outline" size={30} color="black" />
+        <Ionicons name="arrow-back-circle-outline" size={30} color="white" />
       </TouchableOpacity>
+
       <View style={styles.header}>
         <Text style={styles.headerText}>My to do list</Text>
       </View>
@@ -103,25 +115,17 @@ function HomeScreen({ navigation, route }) {
         keyExtractor={item => item.id}
         style={styles.list}
       />
-      <TouchableOpacity
-      onPress={() => navigation.navigate('NewToDo')}
-      style={styles.button}
-    >
-      <Text style={styles.buttonText}>Add new to do list</Text>
-    </TouchableOpacity>
-    <StatusBar style="auto" />
-    <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
-      <Ionicons name="arrow-back-circle-outline" size={30} color="black" />
-    </TouchableOpacity>
-      <StatusBar style="auto" />
+      <TouchableOpacity onPress={() => navigation.navigate('NewToDo')} style={styles.button}>
+        <Text style={styles.buttonText}>Add New ToDo</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
-export default function App() {
+function App() {
   return (
     <NavigationContainer>
-      <Stack.Navigator>
+      <Stack.Navigator initialRouteName="Home">
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="NewToDo" component={NewToDoScreen} />
       </Stack.Navigator>
@@ -132,10 +136,12 @@ export default function App() {
 const styles = StyleSheet.create({
   undoButton: {
     position: 'absolute',
-    right: 20,
-    top: 30,
-    backgroundColor: 'rgba(255,0,0,0.2)', // 红色背景透明度20%用于可视化位置
-    padding: 10 // 增加填充使按钮更容易点击
+    right: 10,
+    top: 50,
+    backgroundColor: 'rgba(0, 0, 255, 0.7)',
+    padding: 10,
+    borderRadius: 30,
+    zIndex: 1000
   },
   container: {
     flex: 1,
@@ -155,7 +161,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     paddingTop: 30,
     paddingBottom: 20,
-    color: 'black',  // Changed color to black
+    color: 'black',
   },
   list: {
     marginTop: 100,
@@ -173,7 +179,7 @@ const styles = StyleSheet.create({
   },
   itemTitle: {
     fontSize: 18,
-    color: 'red',  // Title color set to red
+    color: 'red',
   },
   itemDescription: {
     fontSize: 16,
@@ -198,3 +204,5 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
   }
 });
+
+export default App;
